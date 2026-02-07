@@ -5,7 +5,9 @@
   "main": "src/index.js",
   "type": "module",
   "scripts": {
-    "start": "node src/index.js",
+    "start": "node src/produce.js",
+    "produce": "node src/produce.js",
+    "produce:all": "node src/produce.js --all",
     "demo": "node src/demo.js",
     "render": "node src/render.js",
     "test": "node --test src/**/*.test.js"
