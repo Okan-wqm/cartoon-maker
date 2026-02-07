@@ -1,0 +1,19 @@
+{
+  "name": "cartoon-maker",
+  "version": "1.0.0",
+  "description": "AI Agent-driven puppet animation engine for creating consistent, educational cartoon videos",
+  "main": "src/index.js",
+  "type": "module",
+  "scripts": {
+    "start": "node src/index.js",
+    "demo": "node src/demo.js",
+    "render": "node src/render.js",
+    "test": "node --test src/**/*.test.js"
+  },
+  "keywords": ["cartoon", "animation", "puppet", "sprite", "ai-agent", "educational"],
+  "license": "MIT",
+  "dependencies": {
+    "@napi-rs/canvas": "^0.1.62"
+  },
+  "devDependencies": {}
+}
