@@ -20,6 +20,8 @@ export { ScriptWriter } from './agents/ScriptWriter.js';
 export { ArtistAgent } from './agents/ArtistAgent.js';
 export { AnimatorAgent } from './agents/AnimatorAgent.js';
 export { SoundAgent } from './agents/SoundAgent.js';
+export { FFmpegAgent } from './agents/FFmpegAgent.js';
+export { SpriteGenerator } from './agents/SpriteGenerator.js';
 export { DirectorAgent } from './agents/DirectorAgent.js';
 
 // Characters

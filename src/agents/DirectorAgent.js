@@ -1,8 +1,8 @@
 /**
- * DirectorAgent - Kurgucu/Yönetmen Ajan
+ * DirectorAgent - Kurgucu/Yönetmen Ajan (v2)
  *
  * Tüm ajanları koordine eder, bölümü baştan sona üretir.
- * Senarist → Sanatçı → Animatör → Ses → Render pipeline.
+ * Yeni pipeline: Senaryo → Sprite → Karakter → Animasyon → Ses → Render → Video
  *
  * Bu ajan, tüm sistemin "orkestra şefi"dir.
  */
@@ -10,6 +10,8 @@ import { ScriptWriter } from './ScriptWriter.js';
 import { ArtistAgent } from './ArtistAgent.js';
 import { AnimatorAgent } from './AnimatorAgent.js';
 import { SoundAgent } from './SoundAgent.js';
+import { FFmpegAgent } from './FFmpegAgent.js';
+import { SpriteGenerator } from './SpriteGenerator.js';
 import { Renderer } from '../engine/Renderer.js';
 
 export class DirectorAgent {
@@ -17,6 +19,7 @@ export class DirectorAgent {
     this.scriptWriter = new ScriptWriter({
       targetAge: config.targetAge || '4-8',
       language: config.language || 'tr',
+      claudeApiKey: config.claudeApiKey,
     });
 
     this.artist = new ArtistAgent({
@@ -31,20 +34,36 @@ export class DirectorAgent {
 
     this.sound = new SoundAgent({
       language: config.language || 'tr-TR',
+      elevenLabsApiKey: config.elevenLabsApiKey,
+      voiceIds: config.voiceIds,
+      outputDir: config.outputDir ? `${config.outputDir}/audio` : './output/audio',
+    });
+
+    this.spriteGen = new SpriteGenerator({
+      outputDir: config.outputDir ? `${config.outputDir}/sprites` : './output/sprites',
+      stabilityApiKey: config.stabilityApiKey,
+      provider: config.spriteProvider || 'stability',
+    });
+
+    this.ffmpeg = new FFmpegAgent({
+      fps: config.fps || 24,
+      width: config.width || 1280,
+      height: config.height || 720,
+      outputDir: config.outputDir || './output',
     });
 
     this.renderer = new Renderer({
       width: config.width || 1280,
       height: config.height || 720,
       fps: config.fps || 24,
-      outputDir: config.outputDir || './output/frames',
+      outputDir: config.outputDir ? `${config.outputDir}/frames` : './output/frames',
     });
 
     this.config = config;
   }
 
   /**
-   * Tam bir bölüm üret (uçtan uca pipeline)
+   * Tam bir bölüm üret (uçtan uca pipeline v2)
    *
    * @param {object} params
    * @param {string} params.title - "Ökkeş Balık Avında"
@@ -57,8 +76,10 @@ export class DirectorAgent {
     console.log(`\n🎬 BÖLÜM ÜRETİMİ BAŞLIYOR: "${params.title}"`);
     console.log('='.repeat(60));
 
+    const episodeId = this.sanitizeId(params.title);
     const result = {
       title: params.title,
+      episodeId,
       stages: {},
       timing: {},
     };
@@ -67,7 +88,7 @@ export class DirectorAgent {
     console.log('\n📝 Aşama 1: Senaryo yazılıyor...');
     const scriptStart = Date.now();
 
-    const episode = this.scriptWriter.generateEpisode({
+    const episode = await this.scriptWriter.generateEpisode({
       title: params.title,
       theme: params.theme,
       characters: params.characters,
@@ -77,6 +98,7 @@ export class DirectorAgent {
     result.stages.script = episode;
     result.timing.script = Date.now() - scriptStart;
     console.log(`   ✓ ${episode.scenes.length} sahne, ${episode.totalDuration}sn toplam süre`);
+    console.log(`   ✓ Üretim yöntemi: ${episode.generatedBy || 'template'}`);
 
     // ── AŞAMA 2: KARAKTER TASARIMI ───────────────────
     console.log('\n🎨 Aşama 2: Karakterler tasarlanıyor...');
@@ -92,6 +114,24 @@ export class DirectorAgent {
     result.stages.characters = [...characterSheets.keys()];
     result.timing.art = Date.now() - artStart;
 
+    // ── AŞAMA 2b: AI SPRITE ÜRETİMİ (opsiyonel) ────
+    if (this.config.generateSprites) {
+      console.log('\n🖼️  Aşama 2b: AI sprite üretimi...');
+      const spriteStart = Date.now();
+
+      for (const charSpec of params.characters) {
+        try {
+          const spriteResult = await this.spriteGen.generateCharacterSprites(charSpec);
+          result.stages.sprites = result.stages.sprites || {};
+          result.stages.sprites[charSpec.name] = spriteResult;
+        } catch (err) {
+          console.log(`   ⚠ ${charSpec.name} sprite üretimi atlandı: ${err.message}`);
+        }
+      }
+
+      result.timing.sprites = Date.now() - spriteStart;
+    }
+
     // ── AŞAMA 3: ANİMASYON ──────────────────────────
     console.log('\n🎭 Aşama 3: Sahneler animasyona dönüştürülüyor...');
     const animStart = Date.now();
@@ -101,20 +141,31 @@ export class DirectorAgent {
     result.timing.animation = Date.now() - animStart;
     console.log(`   ✓ ${scenes.length} sahne hazır`);
 
-    // ── AŞAMA 4: SES TASARIMI ───────────────────────
-    console.log('\n🔊 Aşama 4: Ses planı oluşturuluyor...');
+    // ── AŞAMA 4: SES ÜRETİMİ ────────────────────────
+    console.log('\n🔊 Aşama 4: Ses üretimi...');
     const soundStart = Date.now();
 
-    const soundPlans = episode.scenes.map(sceneScript =>
-      this.sound.createSoundPlan(sceneScript)
-    );
+    let soundResult;
+    try {
+      soundResult = await this.sound.generateEpisodeAudio(episode, episodeId);
+    } catch (err) {
+      console.log(`   ⚠ Ses üretimi hatası: ${err.message}`);
+      // Ses planı yine de oluştur
+      soundResult = {
+        soundPlan: episode.scenes.map(s => this.sound.createSoundPlan(s)),
+        dialogueFiles: [],
+        totalDialogues: 0,
+        errors: [{ error: err.message }],
+      };
+    }
 
-    result.stages.sound = soundPlans.map(p => ({
-      scene: p.sceneName,
-      trackCount: p.tracks.length,
-    }));
+    result.stages.sound = {
+      totalDialogues: soundResult.totalDialogues,
+      trackCount: soundResult.soundPlan.reduce((s, p) => s + p.tracks.length, 0),
+      errors: soundResult.errors.length,
+    };
     result.timing.sound = Date.now() - soundStart;
-    console.log(`   ✓ ${soundPlans.reduce((s, p) => s + p.tracks.length, 0)} ses track'i planlandı`);
+    console.log(`   ✓ ${soundResult.totalDialogues} diyalog, ${result.stages.sound.trackCount} ses track'i`);
 
     // ── AŞAMA 5: RENDER ─────────────────────────────
     console.log('\n🎥 Aşama 5: Frame\'ler render ediliyor...');
@@ -124,19 +175,37 @@ export class DirectorAgent {
     result.stages.render = { totalFrames: allFrames.length };
     result.timing.render = Date.now() - renderStart;
 
+    // ── AŞAMA 6: VIDEO ÜRETİMİ ─────────────────────
+    console.log('\n🎬 Aşama 6: Video oluşturuluyor...');
+    const videoStart = Date.now();
+
+    const videoResult = await this.ffmpeg.produceVideo({
+      episodeId,
+      framePaths: allFrames,
+      soundResult,
+    });
+
+    result.stages.video = {
+      success: videoResult.success,
+      outputFile: videoResult.outputFile,
+      scriptFile: videoResult.scriptFile,
+    };
+    result.timing.video = Date.now() - videoStart;
+
     // ── ÖZET ─────────────────────────────────────────
     const totalTime = Date.now() - scriptStart;
     console.log('\n' + '='.repeat(60));
     console.log(`🎬 BÖLÜM TAMAMLANDI: "${params.title}"`);
+    console.log(`   Senaryo: ${episode.generatedBy || 'template'}`);
     console.log(`   Sahneler: ${scenes.length}`);
     console.log(`   Frame'ler: ${allFrames.length}`);
-    console.log(`   Ses Track'leri: ${soundPlans.reduce((s, p) => s + p.tracks.length, 0)}`);
+    console.log(`   Diyaloglar: ${soundResult.totalDialogues}`);
+    console.log(`   Video: ${videoResult.success ? videoResult.outputFile : 'FFmpeg gerekli'}`);
     console.log(`   Toplam süre: ${(totalTime / 1000).toFixed(1)}sn`);
-    console.log(`   FFmpeg komutu: ${this.renderer.getFFmpegCommand()}`);
 
     result.timing.total = totalTime;
     result.framePaths = allFrames;
-    result.ffmpegCommand = this.renderer.getFFmpegCommand();
+    result.videoResult = videoResult;
 
     return result;
   }
@@ -158,7 +227,7 @@ export class DirectorAgent {
 
       const result = await this.produceEpisode({
         ...ep,
-        characters: seriesConfig.characters, // Aynı karakterler!
+        characters: seriesConfig.characters,
       });
       results.push(result);
     }
@@ -174,7 +243,7 @@ export class DirectorAgent {
    * Sadece önizleme (tek frame)
    */
   previewScene(params, sceneIndex = 0, timeInScene = 0) {
-    const episode = this.scriptWriter.generateEpisode(params);
+    const episode = this.scriptWriter.generateFromTemplate(params);
     const characterSheets = new Map();
     for (const charSpec of params.characters) {
       characterSheets.set(charSpec.name, this.artist.createCharacter(charSpec));
@@ -184,7 +253,6 @@ export class DirectorAgent {
     if (sceneIndex >= scenes.length) sceneIndex = 0;
     const scene = scenes[sceneIndex];
 
-    // Belirtilen zamana ilerlet
     const dt = 1 / this.renderer.fps;
     const steps = Math.floor(timeInScene * this.renderer.fps);
     for (let i = 0; i < steps; i++) {
@@ -192,5 +260,17 @@ export class DirectorAgent {
     }
 
     return this.renderer.renderFrame(scene);
+  }
+
+  sanitizeId(title) {
+    return title
+      .replace(/[ıİ]/g, 'i')
+      .replace(/[öÖ]/g, 'o')
+      .replace(/[üÜ]/g, 'u')
+      .replace(/[çÇ]/g, 'c')
+      .replace(/[şŞ]/g, 's')
+      .replace(/[ğĞ]/g, 'g')
+      .replace(/[^a-zA-Z0-9]/g, '_')
+      .toLowerCase();
   }
 }

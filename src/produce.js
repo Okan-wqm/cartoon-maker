@@ -1,18 +1,28 @@
 #!/usr/bin/env node
 /**
- * produce.js - Tek komutla YouTube-ready cizgi film uret
+ * produce.js - Tek komutla YouTube-ready cizgi film uret (v2)
  *
  * Kullanim:
  *   node src/produce.js                          # Varsayilan: Okkes Balik Avinda
  *   node src/produce.js "Ökkeş Maçta"            # Belirli bolum
  *   node src/produce.js --all                     # Tum bolumleri uret
+ *   node src/produce.js --sprites                 # AI sprite uretimi ile
+ *
+ * Ortam Degiskenleri:
+ *   ELEVENLABS_API_KEY    → ElevenLabs TTS (karakter sesleri)
+ *   ANTHROPIC_API_KEY     → Claude API (dinamik senaryo)
+ *   STABILITY_API_KEY     → Stable Diffusion (AI sprite)
  *
  * Cikti:
  *   output/
  *     frames/          - PNG frame'ler
- *     preview_*.png    - Sahne onizlemeleri (thumbnail icin)
+ *     audio/           - Karakter ses dosyalari (ElevenLabs)
+ *     sprites/         - AI uretilmis spritelar
+ *     preview_*.png    - Sahne onizlemeleri
  *     metadata.json    - YouTube baslik, aciklama, etiketler
  *     thumbnail.png    - YouTube thumbnail (1280x720)
+ *     *.mp4            - Final video (FFmpeg varsa)
+ *     *_build.sh       - Video build scripti (FFmpeg yoksa)
  */
 import { DirectorAgent } from './agents/DirectorAgent.js';
 import { EpisodeTemplates, getAllCharacters } from './characters/okkes-universe.js';
@@ -144,7 +154,6 @@ function generateThumbnail(director, template, outputPath) {
 
   // Karakterleri ciz (onizleme frameden al)
   const previewBuffer = director.previewScene(template, 0, 3);
-  // Preview'u dogrudan kaydet - thumbnail olarak da kullanabiliriz
 
   // Tema etiketi
   const themeLabel = template.theme.charAt(0).toUpperCase() + template.theme.slice(1);
@@ -175,10 +184,21 @@ function generateThumbnail(director, template, outputPath) {
 async function main() {
   const args = process.argv.slice(2);
   const produceAll = args.includes('--all');
+  const generateSprites = args.includes('--sprites');
   const episodeName = args.find(a => !a.startsWith('--')) || 'Ökkeş Balık Avında';
 
   console.log('╔══════════════════════════════════════════════════════════╗');
-  console.log('║  🐱 CARTOON MAKER - YouTube-Ready Çizgi Film Üretici   ║');
+  console.log('║  🐱 CARTOON MAKER v2 - AI-Powered Çizgi Film Üretici   ║');
+  console.log('╠══════════════════════════════════════════════════════════╣');
+
+  // API durumlarını göster
+  const hasElevenLabs = !!process.env.ELEVENLABS_API_KEY;
+  const hasClaude = !!process.env.ANTHROPIC_API_KEY;
+  const hasStability = !!process.env.STABILITY_API_KEY;
+
+  console.log(`║  ElevenLabs TTS:    ${hasElevenLabs ? '✓ Aktif' : '⚠ API key yok (manifest mode)'}  `);
+  console.log(`║  Claude Senaryo:    ${hasClaude ? '✓ Aktif' : '⚠ API key yok (template mode)'}  `);
+  console.log(`║  Stable Diffusion:  ${hasStability ? '✓ Aktif' : '⚠ API key yok (programatik)'}  `);
   console.log('╚══════════════════════════════════════════════════════════╝');
 
   const director = new DirectorAgent({
@@ -187,7 +207,9 @@ async function main() {
     fps: 24,
     width: 1280,
     height: 720,
-    outputDir: './output/frames',
+    outputDir: './output',
+    generateSprites: generateSprites,
+    // API key'ler env var'lardan otomatik alınır
   });
 
   if (!existsSync('./output')) mkdirSync('./output', { recursive: true });
@@ -199,7 +221,7 @@ async function main() {
   for (const template of templates) {
     console.log(`\n${'═'.repeat(60)}`);
 
-    // 1. Bolumu uret
+    // 1. Bolumu uret (yeni async pipeline)
     const result = await director.produceEpisode(template);
 
     // 2. YouTube metadata
@@ -234,16 +256,42 @@ async function main() {
     console.log(`\nEtiketler:\n  ${metadata.tags.slice(0, 8).join(', ')}...`);
     console.log(`\nKategori: ${metadata.category}`);
     console.log(`Çocuklara uygun: ${metadata.madeForKids ? 'Evet' : 'Hayır'}`);
-    console.log(`\nVideo oluşturmak için:`);
-    console.log(`  ${result.ffmpegCommand}`);
+
+    // Video durumu
+    if (result.videoResult?.success) {
+      console.log(`\n🎬 Video hazır: ${result.videoResult.outputFile}`);
+    } else if (result.videoResult?.scriptFile) {
+      console.log(`\nVideo oluşturmak için:`);
+      console.log(`  bash ${result.videoResult.scriptFile}`);
+    }
+
+    // Ses durumu
+    if (result.stages.sound?.totalDialogues > 0) {
+      console.log(`\n🔊 Ses: ${result.stages.sound.totalDialogues} diyalog`);
+      if (!hasElevenLabs) {
+        console.log('  ⚠ ElevenLabs API key ayarlayarak gerçek ses üretebilirsiniz:');
+        console.log('    export ELEVENLABS_API_KEY="your-key-here"');
+      }
+    }
+
     console.log(`\nDosyalar:`);
     console.log(`  output/metadata.json    - YouTube başlık ve açıklama`);
     console.log(`  output/thumbnail.png    - YouTube thumbnail`);
     console.log(`  output/frames/          - ${result.framePaths.length} PNG frame`);
+    if (result.stages.sound?.totalDialogues > 0) {
+      console.log(`  output/audio/           - Ses dosyaları ve manifest`);
+    }
   }
 
   console.log(`\n${'═'.repeat(60)}`);
   console.log('✅ Üretim tamamlandı!');
+
+  if (!hasElevenLabs || !hasClaude || !hasStability) {
+    console.log('\n💡 İPUCU: Tam AI deneyimi için ortam değişkenlerini ayarlayın:');
+    if (!hasClaude) console.log('  export ANTHROPIC_API_KEY="..."   → Yaratıcı AI senaryolar');
+    if (!hasElevenLabs) console.log('  export ELEVENLABS_API_KEY="..."  → Karakter seslendirme');
+    if (!hasStability) console.log('  export STABILITY_API_KEY="..."   → AI karakter sprite\'ları');
+  }
 }
 
 main().catch(console.error);

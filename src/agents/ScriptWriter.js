@@ -1,30 +1,154 @@
 /**
- * ScriptWriter Agent - Senarist Ajan
+ * ScriptWriter Agent - Senarist Ajan (v2 - Claude API + Template Fallback)
  *
- * Bir konu/tema alır, çocuklara uygun eğitici senaryo üretir.
+ * Claude API ile dinamik, yaratıcı, her seferinde farklı senaryolar üretir.
+ * API key yoksa template-based fallback kullanır.
+ *
  * Çıktı: Sahne listesi (her sahne: açıklama, diyaloglar, hareketler, süre)
- *
- * AI entegrasyonu: Claude/GPT API ile senaryo üretimi yapılabilir.
- * Şimdilik template-based + parametrik sistem.
  */
 export class ScriptWriter {
   constructor(config = {}) {
-    this.targetAge = config.targetAge || '4-8'; // Hedef yaş grubu
-    this.language = config.language || 'tr';     // Dil
-    this.maxDuration = config.maxDuration || 600; // Maks süre (saniye, 10dk)
+    this.targetAge = config.targetAge || '4-8';
+    this.language = config.language || 'tr';
+    this.maxDuration = config.maxDuration || 600;
     this.educationalFocus = config.educationalFocus || 'general';
+    this.claudeApiKey = config.claudeApiKey || process.env.ANTHROPIC_API_KEY || '';
+    this.claudeModel = config.claudeModel || 'claude-sonnet-4-5-20250929';
+    this.claudeBaseUrl = config.claudeBaseUrl || 'https://api.anthropic.com/v1';
   }
 
   /**
    * Tam bir bölüm senaryosu üret
-   * @param {object} params
-   * @param {string} params.title - Bölüm başlığı (ör: "Ökkeş Balık Avında")
-   * @param {string} params.theme - Eğitim teması (ör: "sayılar", "renkler", "paylaşma")
-   * @param {object[]} params.characters - Kullanılacak karakterler
-   * @param {string} params.setting - Mekan (ör: "göl kenarı", "futbol sahası")
-   * @returns {Episode}
+   * Claude API varsa dinamik, yoksa template-based
    */
-  generateEpisode(params) {
+  async generateEpisode(params) {
+    // Claude API varsa dinamik senaryo üret
+    if (this.claudeApiKey) {
+      try {
+        console.log('  🤖 Claude API ile dinamik senaryo üretiliyor...');
+        const aiEpisode = await this.generateWithClaude(params);
+        if (aiEpisode) return aiEpisode;
+      } catch (err) {
+        console.log(`  ⚠ Claude API hatası: ${err.message}, template'e düşülüyor...`);
+      }
+    }
+
+    // Fallback: template-based
+    return this.generateFromTemplate(params);
+  }
+
+  /**
+   * Claude API ile dinamik senaryo üret
+   */
+  async generateWithClaude(params) {
+    const charDescriptions = (params.characters || [])
+      .map(c => `- ${c.name} (${c.type}): ${c.personality}, Slogan: "${c.catchphrase}"`)
+      .join('\n');
+
+    const systemPrompt = `Sen çocuklar için eğitici çizgi film senaryosu yazan yaratıcı bir yazarsın.
+
+KURALLAR:
+- Hedef yaş grubu: ${this.targetAge} yaş
+- Dil: Türkçe
+- Tüm içerik çocuk dostu olmalı (korku, şiddet, olumsuzluk YOK)
+- Her bölüm eğitici bir tema içermeli
+- Karakterler tutarlı kişiliklerde olmalı
+- Diyaloglar kısa, net, çocuğun anlayacağı seviyede
+- Mizah ve sürpriz unsurları kullan
+- Her bölüm pozitif bir mesajla bitsin
+
+ÇIKTI FORMATI:
+JSON formatında sahne listesi döndür. Her sahne şu yapıda olmalı:
+{
+  "title": "Bölüm başlığı",
+  "theme": "eğitim teması",
+  "targetAge": "${this.targetAge}",
+  "scenes": [
+    {
+      "name": "Sahne adı",
+      "duration": 15,
+      "description": "Sahne açıklaması",
+      "background": { "color": "#hex", "type": "park|lake|forest|field|school|beach|home" },
+      "events": [
+        { "time": 0, "type": "visible", "actorId": "KarakterAdı", "visible": true },
+        { "time": 0.5, "type": "animate", "actorId": "KarakterAdı", "preset": "idle|walk|run|jump|wave|nod|celebrate|think|scared" },
+        { "time": 1, "type": "talk", "actorId": "KarakterAdı", "text": "Diyalog", "duration": 3 },
+        { "time": 4, "type": "expression", "actorId": "KarakterAdı", "expression": "idle|happy|sad|angry|surprised|talking|sleeping|winking" },
+        { "time": 5, "type": "move", "actorId": "KarakterAdı", "targetX": 500, "targetY": 400, "duration": 2 },
+        { "time": 7, "type": "squash", "actorId": "KarakterAdı", "partName": "body", "amount": 0.15 },
+        { "time": 8, "type": "particles", "x": 640, "y": 360, "color": "#FFD700", "count": 15, "speed": 80, "life": 2 }
+      ]
+    }
+  ],
+  "totalDuration": 85
+}
+
+MEVCUT PRESETLER: idle, walk, run, jump, wave, nod, celebrate, think, scared
+MEVCUT EXPRESSION'LAR: idle, happy, sad, angry, surprised, talking, sleeping, winking
+MEVCUT BACKGROUND TIPLERI: lake, field, park, school, forest, beach, home
+
+4 sahne oluştur: Açılış (15sn) → Gelişme (25sn) → Eğitici Bölüm (30sn) → Kapanış (15sn)
+
+ÖNEMLİ: Sadece JSON döndür, açıklama veya markdown ekleme.`;
+
+    const userPrompt = `Şu parametrelerle yeni ve yaratıcı bir bölüm senaryosu yaz:
+
+Başlık: ${params.title}
+Tema: ${params.theme || 'general'}
+Mekan: ${params.setting || 'park'}
+
+Karakterler:
+${charDescriptions}
+
+Her seferinde farklı ve sürprizli bir hikaye oluştur. Eğitici unsurları doğal olarak hikayeye entegre et.`;
+
+    const response = await fetch(`${this.claudeBaseUrl}/messages`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'x-api-key': this.claudeApiKey,
+        'anthropic-version': '2023-06-01',
+      },
+      body: JSON.stringify({
+        model: this.claudeModel,
+        max_tokens: 4096,
+        system: systemPrompt,
+        messages: [{ role: 'user', content: userPrompt }],
+      }),
+    });
+
+    if (!response.ok) {
+      const errorText = await response.text().catch(() => 'Unknown error');
+      throw new Error(`Claude API hata ${response.status}: ${errorText}`);
+    }
+
+    const data = await response.json();
+    const content = data.content?.[0]?.text || '';
+
+    // JSON parse et
+    const jsonMatch = content.match(/\{[\s\S]*\}/);
+    if (!jsonMatch) {
+      throw new Error('Claude API geçerli JSON döndürmedi');
+    }
+
+    const episode = JSON.parse(jsonMatch[0]);
+
+    if (!episode.scenes || !Array.isArray(episode.scenes)) {
+      throw new Error('Senaryo scenes dizisi içermiyor');
+    }
+
+    episode.totalDuration = episode.scenes.reduce((sum, s) => sum + (s.duration || 0), 0);
+    episode.characters = params.characters || [];
+    episode.generatedBy = 'claude-api';
+
+    console.log(`  ✓ AI senaryo üretildi: ${episode.scenes.length} sahne, ${episode.totalDuration}sn`);
+    return episode;
+  }
+
+  /**
+   * Template-based senaryo üret (fallback)
+   */
+  generateFromTemplate(params) {
     const episode = {
       title: params.title,
       theme: params.theme || 'general',
@@ -33,9 +157,9 @@ export class ScriptWriter {
       targetAge: this.targetAge,
       scenes: [],
       totalDuration: 0,
+      generatedBy: 'template',
     };
 
-    // Temel hikaye yapısı: Giriş → Gelişme → Eğitici Bölüm → Sonuç
     episode.scenes = this.buildStoryStructure(params);
     episode.totalDuration = episode.scenes.reduce((sum, s) => sum + s.duration, 0);
 
@@ -50,7 +174,6 @@ export class ScriptWriter {
     const mainChar = params.characters[0]?.name || 'Ökkeş';
     const sideChars = params.characters.slice(1).map(c => c.name);
 
-    // PERDE 1: AÇILIŞ (tanıtım, ortam, selamlama)
     scenes.push({
       name: 'Açılış',
       duration: 15,
@@ -67,7 +190,6 @@ export class ScriptWriter {
       background: this.getSettingBackground(params.setting),
     });
 
-    // PERDE 2: GELİŞME (problem/macera başlar)
     scenes.push({
       name: 'Gelişme',
       duration: 25,
@@ -76,7 +198,6 @@ export class ScriptWriter {
       background: this.getSettingBackground(params.setting),
     });
 
-    // PERDE 3: EĞİTİCİ BÖLÜM (öğrenme anı)
     scenes.push({
       name: 'Eğitici Bölüm',
       duration: 30,
@@ -85,7 +206,6 @@ export class ScriptWriter {
       background: this.getSettingBackground(params.setting),
     });
 
-    // PERDE 4: SONUÇ (öğrenilen ders, vedalaşma)
     scenes.push({
       name: 'Kapanış',
       duration: 15,
@@ -104,9 +224,6 @@ export class ScriptWriter {
     return scenes;
   }
 
-  /**
-   * Gelişme sahnesi olayları
-   */
   generateDevelopmentEvents(mainChar, sideChars, params) {
     const events = [
       { time: 0, type: 'animate', actorId: mainChar, preset: 'walk', duration: 3 },
@@ -124,7 +241,6 @@ export class ScriptWriter {
       );
     }
 
-    // Tema bazlı ek olaylar
     events.push(
       { time: 12, type: 'talk', actorId: mainChar, text: this.getThemeIntro(params.theme), duration: 3 },
       { time: 16, type: 'animate', actorId: mainChar, preset: 'nod', duration: 1 },
@@ -133,9 +249,6 @@ export class ScriptWriter {
     return events;
   }
 
-  /**
-   * Eğitici bölüm olayları
-   */
   generateEducationalEvents(mainChar, sideChars, params) {
     const events = [];
     const theme = params.theme || 'sayılar';
