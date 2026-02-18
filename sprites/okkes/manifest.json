@@ -1,0 +1,81 @@
+{
+  "name": "Ökkeş",
+  "type": "cat",
+  "dimensions": { "width": 200, "height": 280 },
+  "pivot": { "x": 100, "y": 140 },
+  "metadata": {
+    "description": "Turuncu çizgili kedi, meraklı ve cesur",
+    "personality": "meraklı, cesur, iyi kalpli",
+    "colors": {
+      "primary": "#FF8C42",
+      "secondary": "#FFD4A8",
+      "accent": "#2ECC40"
+    }
+  },
+  "parts": [
+    {
+      "name": "body",
+      "file": "body",
+      "offset": { "x": 50, "y": 80 },
+      "anchor": { "x": 50, "y": 40 },
+      "zIndex": 5,
+      "notes": "Govde + karin. Yaklasik 100x80px. Omuza kadar, bacaklar haric."
+    },
+    {
+      "name": "head",
+      "file": "head",
+      "offset": { "x": 40, "y": 10 },
+      "anchor": { "x": 60, "y": 60 },
+      "zIndex": 10,
+      "notes": "Kafa + kulaklar + yuz. En buyuk parca ~120x100px. Anchor = boyun noktasi."
+    },
+    {
+      "name": "tail",
+      "file": "tail",
+      "offset": { "x": -10, "y": 70 },
+      "anchor": { "x": 20, "y": 10 },
+      "zIndex": 2,
+      "notes": "Kuyruk. Anchor = govdeye baglandigi nokta. Yukari kivrilmis."
+    },
+    {
+      "name": "leftArm",
+      "file": "left_arm",
+      "offset": { "x": 15, "y": 82 },
+      "anchor": { "x": 15, "y": 5 },
+      "zIndex": 3,
+      "notes": "Sol kol + pati. Anchor = omuz noktasi (ust). ~30x60px."
+    },
+    {
+      "name": "rightArm",
+      "file": "right_arm",
+      "offset": { "x": 105, "y": 82 },
+      "anchor": { "x": 15, "y": 5 },
+      "zIndex": 3,
+      "notes": "Sag kol + pati. Sol kolun ayna goruntusu."
+    },
+    {
+      "name": "leftLeg",
+      "file": "left_leg",
+      "offset": { "x": 35, "y": 130 },
+      "anchor": { "x": 15, "y": 5 },
+      "zIndex": 4,
+      "notes": "Sol bacak + pati. Anchor = kalca noktasi (ust). ~30x60px."
+    },
+    {
+      "name": "rightLeg",
+      "file": "right_leg",
+      "offset": { "x": 80, "y": 130 },
+      "anchor": { "x": 15, "y": 5 },
+      "zIndex": 4,
+      "notes": "Sag bacak + pati. Sol bacagin ayna goruntusu."
+    }
+  ],
+  "expression_files": {
+    "notes": "Opsiyonel: Yuz ifadeleri icin ayri PNG'ler",
+    "face_happy.png": "Gulmesekli yuz, gozler kapali, agiz acik",
+    "face_sad.png": "Uzgun yuz, agzi asagida",
+    "face_surprised.png": "Saskin yuz, gozler buyuk, agiz O seklinde",
+    "face_angry.png": "Kizgin yuz, kaslar catik",
+    "face_sleeping.png": "Uyuyan yuz, gozler kapali, zzz"
+  }
+}
